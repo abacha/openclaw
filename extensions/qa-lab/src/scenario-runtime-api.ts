@@ -67,6 +67,7 @@ type QaScenarioRuntimeDeps = {
   scanGatewayLogSentinels: QaScenarioRuntimeFunction;
   assertNoGatewayLogSentinels: QaScenarioRuntimeFunction;
   readSessionTranscriptSummary: QaScenarioRuntimeFunction;
+  readSessionUserTurnSenders: QaScenarioRuntimeFunction;
   runQaCli: QaScenarioRuntimeFunction;
   extractMediaPathFromText: QaScenarioRuntimeFunction;
   resolveGeneratedImagePath: QaScenarioRuntimeFunction;
@@ -161,6 +162,7 @@ type QaScenarioRuntimeApi<
   scanGatewayLogSentinels: TDeps["scanGatewayLogSentinels"];
   assertNoGatewayLogSentinels: TDeps["assertNoGatewayLogSentinels"];
   readSessionTranscriptSummary: TDeps["readSessionTranscriptSummary"];
+  readSessionUserTurnSenders: TDeps["readSessionUserTurnSenders"];
   runQaCli: TDeps["runQaCli"];
   extractMediaPathFromText: TDeps["extractMediaPathFromText"];
   resolveGeneratedImagePath: TDeps["resolveGeneratedImagePath"];
@@ -272,6 +274,7 @@ export function createQaScenarioRuntimeApi<
     scanGatewayLogSentinels: params.deps.scanGatewayLogSentinels,
     assertNoGatewayLogSentinels: params.deps.assertNoGatewayLogSentinels,
     readSessionTranscriptSummary: params.deps.readSessionTranscriptSummary,
+    readSessionUserTurnSenders: params.deps.readSessionUserTurnSenders,
     runQaCli: params.deps.runQaCli,
     extractMediaPathFromText: params.deps.extractMediaPathFromText,
     resolveGeneratedImagePath: params.deps.resolveGeneratedImagePath,

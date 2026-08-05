@@ -45,6 +45,7 @@ import {
   readEffectiveTools,
   readRawQaSessionStore,
   readSessionTranscriptSummary,
+  readSessionUserTurnSenders,
   readSkillStatus,
   resolveGeneratedImagePath,
   runAgentPrompt,
@@ -257,6 +258,7 @@ function createQaSuiteScenarioDeps(params: QaSuiteScenarioDepsParams) {
     assertNoGatewayLogSentinels: (options?: Parameters<typeof assertNoGatewayLogSentinels>[1]) =>
       assertNoGatewayLogSentinels(params.env.gateway.logs?.(), options),
     readSessionTranscriptSummary,
+    readSessionUserTurnSenders,
     runQaCli,
     extractMediaPathFromText,
     resolveGeneratedImagePath,

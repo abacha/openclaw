@@ -67,6 +67,14 @@ type QaSessionTranscriptSummaryOptions = {
   allowEmpty?: boolean;
 };
 
+type QaSessionUserTurnSender = {
+  senderId?: string;
+  senderName?: string;
+  senderUsername?: string;
+  text?: string;
+  timestamp?: number;
+};
+
 function isSessionStoreLockTimeout(error: unknown) {
   const text = formatErrorMessage(error);
   return (
@@ -455,11 +463,68 @@ async function readSessionTranscriptSummary(
   return summarizeSessionTranscriptEvents(selectedEvents, normalizedSessionKey, events.length);
 }
 
+/**
+ * Reads the persisted `__openclaw` sender metadata off every user-role transcript
+ * event for a session. `readSessionTranscriptSummary` deliberately skips role="user"
+ * content (it only summarizes assistant/toolResult events), so it cannot see which
+ * sender identity was actually persisted on a user turn -- the exact thing a
+ * live-ctx-vs-stale-sessionCtx regression needs to inspect.
+ */
+async function readSessionUserTurnSenders(
+  env: Pick<QaSuiteRuntimeEnv, "gateway">,
+  sessionKey: string,
+  options: { afterEventCursor?: number } = {},
+): Promise<QaSessionUserTurnSender[]> {
+  const normalizedSessionKey = sessionKey.trim();
+  if (!normalizedSessionKey) {
+    throw new Error("readSessionUserTurnSenders requires a session key");
+  }
+  const store = await readRawQaSessionStore(env);
+  const entry = store[normalizedSessionKey];
+  const sessionId = readNonEmptyString(entry?.sessionId);
+  if (!sessionId) {
+    throw new Error(`session transcript entry not found for ${normalizedSessionKey}`);
+  }
+  const events = loadTranscriptEventsSync({
+    agentId: "qa",
+    env: qaSessionRuntimeEnv(env.gateway.tempRoot),
+    sessionId,
+    sessionKey: normalizedSessionKey,
+  });
+  const afterEventCursor = options.afterEventCursor ?? 0;
+  if (
+    !Number.isSafeInteger(afterEventCursor) ||
+    afterEventCursor < 0 ||
+    afterEventCursor > events.length
+  ) {
+    throw new Error(
+      `invalid session transcript event cursor ${afterEventCursor} for ${normalizedSessionKey} with ${events.length} event(s)`,
+    );
+  }
+  const senders: QaSessionUserTurnSender[] = [];
+  for (const event of events.slice(afterEventCursor)) {
+    const message = readSessionTranscriptEventMessage(event);
+    if (!message || message.role !== "user") {
+      continue;
+    }
+    const openClawMeta = isRecord(message["__openclaw"]) ? message["__openclaw"] : undefined;
+    senders.push({
+      senderId: readNonEmptyString(openClawMeta?.senderId),
+      senderName: readNonEmptyString(openClawMeta?.senderName),
+      senderUsername: readNonEmptyString(openClawMeta?.senderUsername),
+      text: extractGatewayMessageText(message) || undefined,
+      timestamp: typeof message.timestamp === "number" ? message.timestamp : undefined,
+    });
+  }
+  return senders;
+}
+
 export {
   createSession,
   readEffectiveTools,
   readRawQaSessionStore,
   readSessionTranscriptSummary,
+  readSessionUserTurnSenders,
   readSkillStatus,
   seedQaSessionTranscript,
 };
