@@ -768,6 +768,85 @@ describe("runReplyAgent media path normalization", () => {
     expect(createReplyMediaContextRuntimeMock).not.toHaveBeenCalled();
   });
 
+  it("scopes the outbound host media read gate to the followup turn's live sender", async () => {
+    // Regression coverage for the ctx-first sender fix in get-reply-run-execute.ts:
+    // requesterSenderId here is what read-capability.ts gates on (see
+    // read-capability.test.ts "does not enable host reads when sender group policy
+    // denies read"), so this proves the live sender on followupRun.run reaches that
+    // gate rather than a stale one.
+    runEmbeddedAgentMock.mockResolvedValue({
+      payloads: [],
+      meta: {
+        agentMeta: {
+          sessionId: "session",
+          provider: "anthropic",
+          model: "claude",
+        },
+      },
+    });
+
+    const { executeAgentTurn } = await import("./agent-runner-execution.js");
+    const followupRun = createMockFollowupRun({
+      prompt: "generate",
+      run: {
+        provider: "anthropic",
+        model: "claude",
+        workspaceDir: "/tmp/workspace",
+        config: {},
+        senderId: "user-bob",
+        senderName: "Bob",
+        senderUsername: "bob",
+      },
+    });
+    await executeAgentTurn({
+      commandBody: "generate",
+      followupRun,
+      sessionCtx: {
+        Provider: "telegram",
+        Surface: "telegram",
+        To: "chat-1",
+        OriginatingTo: "chat-1",
+        AccountId: "default",
+        MessageSid: "msg-1",
+      } as unknown as TemplateContext,
+      typingSignals: {
+        mode: "instant",
+        shouldStartImmediately: true,
+        shouldStartOnMessageStart: false,
+        shouldStartOnText: true,
+        shouldStartOnReasoning: false,
+        signalRunStart: async () => {},
+        signalMessageStart: async () => {},
+        signalTextDelta: async () => {},
+        signalReasoningDelta: async () => {},
+        signalToolStart: async () => {},
+      },
+      blockReplyPipeline: null,
+      blockStreamingEnabled: true,
+      resolvedBlockStreamingBreak: "message_end",
+      applyReplyToMode: (payload) => payload,
+      shouldEmitToolResult: () => false,
+      shouldEmitToolOutput: () => false,
+      pendingToolTasks: new Set(),
+      resetSessionAfterRoleOrderingConflict: async () => false,
+      isHeartbeat: false,
+      sessionKey: "main",
+      getActiveSessionEntry: () => undefined,
+      resolvedVerboseLevel: "off",
+      // No caller-provided replyMediaContext: executeAgentTurn must build its own,
+      // which is the branch that reads followupRun.run.senderId into requesterSenderId.
+    });
+
+    expect(createReplyMediaContextRuntimeMock).toHaveBeenCalledOnce();
+    expect(createReplyMediaContextRuntimeMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requesterSenderId: "user-bob",
+        requesterSenderName: "Bob",
+        requesterSenderUsername: "bob",
+      }),
+    );
+  });
+
   it("passes current inbound media paths as native OpenClaw images", async () => {
     const tmpDir = await mkdtemp(path.join(os.tmpdir(), "openclaw-native-agent-media-"));
     cleanupPaths.push(tmpDir);

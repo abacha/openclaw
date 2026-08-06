@@ -1324,6 +1324,48 @@ describe("runPreparedReply media-only handling", () => {
     });
   });
 
+  it("resolves the run identity from the live ctx sender, not a stale sessionCtx sender", async () => {
+    // Same divergent-sender setup as the transcript-persistence regression above, but
+    // asserting on followupRun.run: this is the sender identity the reply's outbound
+    // host media read gate (isAgentScopedHostMediaReadAllowed) is scoped against, so a
+    // followup turn must resolve it against the current message's sender, not whichever
+    // sender happens to already be on sessionCtx.
+    await runPreparedReply(
+      baseParams({
+        ctx: {
+          ...createInboundBody("hello"),
+          OriginatingChannel: "telegram",
+          OriginatingTo: "chat-1",
+          ChatType: "group",
+          SenderId: "user-bob",
+          SenderName: "Bob",
+          SenderUsername: "bob",
+        },
+        sessionCtx: {
+          ...createSessionBody("hello"),
+          Provider: "telegram",
+          OriginatingChannel: "telegram",
+          OriginatingTo: "chat-1",
+          ChatType: "group",
+          SenderId: "user-alice",
+          SenderName: "Alice",
+          SenderUsername: "alice",
+        },
+        sessionEntry: {
+          sessionId: "session-1",
+          updatedAt: 1,
+          chatType: "group",
+          channel: "telegram",
+        } as SessionEntry,
+      }),
+    );
+
+    const run = requireRunReplyAgentCall().followupRun.run;
+    expect(run.senderId).toBe("user-bob");
+    expect(run.senderName).toBe("Bob");
+    expect(run.senderUsername).toBe("bob");
+  });
+
   it("normalizes second-based inbound timestamps before preparing user turns", async () => {
     await runPreparedReply(
       baseParams({

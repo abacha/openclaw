@@ -346,11 +346,11 @@ export async function executePreparedReplyRun(state: PreparedReplyRunAdmission) 
       groupSpace: normalizeOptionalString(sessionCtx.GroupSpace),
       // Parent lineage authenticates inherited group policy for queued CLI/MCP runs.
       spawnedBy: normalizeOptionalString(preparedSessionState.sessionEntry?.spawnedBy),
-      senderId: normalizeOptionalString(sessionCtx.SenderId),
+      senderId: normalizeOptionalString(ctx.SenderId ?? sessionCtx.SenderId),
       channelContext: ctx.ChannelContext ?? sessionCtx.ChannelContext,
-      senderName: normalizeOptionalString(sessionCtx.SenderName),
-      senderUsername: normalizeOptionalString(sessionCtx.SenderUsername),
-      senderE164: normalizeOptionalString(sessionCtx.SenderE164),
+      senderName: normalizeOptionalString(ctx.SenderName ?? sessionCtx.SenderName),
+      senderUsername: normalizeOptionalString(ctx.SenderUsername ?? sessionCtx.SenderUsername),
+      senderE164: normalizeOptionalString(ctx.SenderE164 ?? sessionCtx.SenderE164),
       // Queued system events are prompt content in the same trusted session;
       // they do not rewrite the sender identity used by command/action auth.
       senderIsOwner: command.senderIsOwner,
