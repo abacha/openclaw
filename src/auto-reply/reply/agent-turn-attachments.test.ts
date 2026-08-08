@@ -31,10 +31,12 @@ describe("resolveAgentTurnAttachments", () => {
       ctx: {
         MediaPath: "/tmp/inbound/photo.jpg",
         MediaType: "image/jpeg",
+        media: [{ path: "/tmp/inbound/photo.jpg", contentType: "image/jpeg" }],
       } satisfies MsgContext,
       cfg: {} as OpenClawConfig,
       runtime: {
         MediaAttachmentCache: FakeMediaAttachmentCache as never,
+        isImageAttachment: (attachment) => Boolean(attachment.mime?.startsWith("image/")),
         isMediaUnderstandingSkipError: () => false,
         normalizeAttachments: (ctx) => [
           { path: ctx.MediaPath as string, mime: ctx.MediaType as string, index: 0 },
