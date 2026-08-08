@@ -3,6 +3,7 @@ import { normalizeOptionalString } from "@openclaw/normalization-core/string-coe
 import type { AcpTurnAttachment as AgentTurnAttachment } from "../../acp/control-plane/manager.types.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { logVerbose } from "../../globals.js";
+import { createSubsystemLogger } from "../../logging/subsystem.js";
 import type { MediaAttachment } from "../../media-understanding/types.js";
 import { createLazyImportLoader } from "../../shared/lazy-promise.js";
 import type { MsgContext } from "../templating.js";
@@ -11,6 +12,8 @@ import {
   resolveRecentInboundHistoryImages,
 } from "./history-media.js";
 import { hasInboundMedia } from "./inbound-media.js";
+
+const log = createSubsystemLogger("agent-turn-attachments");
 
 const agentTurnMediaRuntimeLoader = createLazyImportLoader(
   () => import("./dispatch-acp-media.runtime.js"),
@@ -132,10 +135,10 @@ export async function resolveAgentTurnAttachments(params: {
           `agent-turn-attachments: skipping attachment #${attachment.index + 1} (${error.reason})`,
         );
       } else {
-        const errorName = error instanceof Error ? error.name : typeof error;
-        logVerbose(
-          `agent-turn-attachments: failed to read attachment #${attachment.index + 1} (${errorName})`,
-        );
+        log.warn(`agent-turn-attachments: failed to read attachment #${attachment.index + 1}`, {
+          error: error instanceof Error ? error.message : String(error),
+          errorName: error instanceof Error ? error.name : typeof error,
+        });
       }
       return false;
     }
