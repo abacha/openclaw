@@ -90,6 +90,24 @@ Details:
 - If image rendering fails, OpenClaw drops the images and continues with the extracted text.
 - If the target model is text-only and extraction produced images, OpenClaw drops the images and sends text only.
 
+### Local OCR fallback (scanned PDFs, no vision model)
+
+When extraction finds a scan with no usable text layer (every page's extracted text is under
+`200` characters _and_ the page rendered images), and every configured vision model is either
+unconfigured or fails, the tool rasterizes the requested pages locally with `pdftoppm` (poppler)
+and reads them with the local `tesseract` binary — no network call, no credentials. The result
+is the raw OCR'd text, returned as-is: this is text **extraction**, not comprehension, so it is
+not sent through any model.
+
+- Default OCR language is `por`.
+- Requires `pdftoppm` and `tesseract` on the host; if either binary is missing the tool raises
+  `Local OCR fallback unavailable: ...` instead of silently degrading.
+- If OCR runs but finds no text either (charts, skewed tables, handwriting), the tool still
+  errors — those need a working vision model, and the error says so explicitly.
+- On success, `details.ocrFallback` is `true` and `details.native` is `false`.
+- A normal textual PDF is unaffected: this path only triggers when text extraction is already
+  near-empty, so nothing changes for the extraction-fallback mode described above.
+
 ## Config
 
 ```json5

@@ -17,6 +17,7 @@ import {
   normalizeMediaReferenceSource,
 } from "../../media/media-reference.js";
 import { extractPdfContent, type PdfExtractedContent } from "../../media/pdf-extract.js";
+import { PdfOcrUnavailableError, runLocalPdfOcr } from "../../media/pdf-ocr-local.js";
 import { loadWebMediaRaw } from "../../media/web-media.js";
 import { resolveUserPath } from "../../utils.js";
 import type { AuthProfileStore } from "../auth-profiles/types.js";
@@ -426,7 +427,7 @@ export function createPdfTool(options?: {
       : DEFAULT_MAX_PAGES;
 
   const description =
-    'Analyze PDF(s): Anthropic/Google native when supported, else text/image extraction. pdf one; pdfs max 10; prompt says inspection. `pages` selects a page range ("1-5", "1,3,5-7"); `password` opens encrypted PDFs (both non-native only).';
+    'Analyze PDF(s): Anthropic/Google native when supported, else text/image extraction. pdf one; pdfs max 10; prompt says inspection. `pages` selects a page range ("1-5", "1,3,5-7"); `password` opens encrypted PDFs (both non-native only). Scanned PDF with no text layer and no working vision model: falls back to local OCR (raw extracted text only, no interpretation).';
   const remoteMediaSsrfPolicy = resolveRemoteMediaSsrfPolicy(options?.config);
 
   return {
@@ -581,7 +582,11 @@ export function createPdfTool(options?: {
         });
       }
 
+      let extractionCache: PdfExtractedContent[] | null = null;
       const getExtractions = async (): Promise<PdfExtractedContent[]> => {
+        if (extractionCache) {
+          return extractionCache;
+        }
         const extractedAll: PdfExtractedContent[] = [];
         for (const pdf of loadedPdfs) {
           // Extraction is sequential and can be CPU-heavy. Do not start the next
@@ -598,28 +603,99 @@ export function createPdfTool(options?: {
           });
           extractedAll.push(extracted);
         }
+        extractionCache = extractedAll;
         return extractedAll;
       };
 
-      // Do not issue a paid PDF-model call for an already-aborted run.
-      signal?.throwIfAborted();
-      const result = await runPdfPrompt({
-        signal,
-        cfg: options?.config,
-        agentId: options?.agentId,
-        agentDir,
-        ...(options?.workspaceDir ? { workspaceDir: options.workspaceDir } : {}),
-        ...(options?.preparedModelRuntime
-          ? { preparedModelRuntime: options.preparedModelRuntime }
-          : {}),
-        pdfModelConfig,
-        modelOverride,
-        prompt: promptRaw,
-        pdfBuffers: loadedPdfs,
-        ...(password ? { password } : {}),
-        pageNumbers,
-        getExtractions,
-      });
+      let result: Awaited<ReturnType<typeof runPdfPrompt>>;
+      let usedLocalOcrFallback = false;
+      try {
+        // Do not issue a paid PDF-model call for an already-aborted run.
+        signal?.throwIfAborted();
+        result = await runPdfPrompt({
+          signal,
+          cfg: options?.config,
+          agentId: options?.agentId,
+          agentDir,
+          ...(options?.workspaceDir ? { workspaceDir: options.workspaceDir } : {}),
+          ...(options?.preparedModelRuntime
+            ? { preparedModelRuntime: options.preparedModelRuntime }
+            : {}),
+          pdfModelConfig,
+          modelOverride,
+          prompt: promptRaw,
+          pdfBuffers: loadedPdfs,
+          ...(password ? { password } : {}),
+          pageNumbers,
+          getExtractions,
+        });
+      } catch (visionError) {
+        // Every vision backend is unconfigured or failed. Only worth a local OCR
+        // attempt when the document actually is a scan with no text layer — a
+        // normal textual PDF failing here is a real model/config problem, not an
+        // OCR-shaped one, so it should keep surfacing the original error. Reuse
+        // extraction results if the failed run already computed them (it usually
+        // has, since every non-native candidate needs them); if extraction itself
+        // is what's broken (bad input, wrong password, corrupt PDF), OCR cannot
+        // help either, so the original error is still the right one to surface.
+        let isScannedWithNoTextLayer = false;
+        if (!signal?.aborted) {
+          try {
+            const extractions = await getExtractions();
+            isScannedWithNoTextLayer = extractions.every(
+              (e) => e.text.trim().length < PDF_MIN_TEXT_CHARS && e.images.length > 0,
+            );
+          } catch {
+            isScannedWithNoTextLayer = false;
+          }
+        }
+        if (!isScannedWithNoTextLayer || signal?.aborted) {
+          throw visionError;
+        }
+        const ocrPageNumbers =
+          pageNumbers ?? Array.from({ length: configuredMaxPages }, (_, i) => i + 1);
+        let ocrText: string;
+        try {
+          const ocrTexts: string[] = [];
+          for (const pdf of loadedPdfs) {
+            signal?.throwIfAborted();
+            const ocr = await runLocalPdfOcr({
+              buffer: pdf.buffer,
+              pageNumbers: ocrPageNumbers,
+              ...(password ? { password } : {}),
+            });
+            if (ocr.text) {
+              ocrTexts.push(loadedPdfs.length > 1 ? `[${pdf.filename}]\n${ocr.text}` : ocr.text);
+            }
+          }
+          ocrText = ocrTexts.join("\n\n").trim();
+        } catch (ocrError) {
+          const reason =
+            ocrError instanceof PdfOcrUnavailableError
+              ? ocrError.message
+              : `local OCR failed: ${ocrError instanceof Error ? ocrError.message : String(ocrError)}`;
+          throw new Error(
+            `PDF has no text layer and every vision model failed (${(visionError as Error).message}). ${reason}`,
+            { cause: ocrError },
+          );
+        }
+        if (!ocrText.trim()) {
+          throw new Error(
+            `PDF has no text layer and every vision model failed (${(visionError as Error).message}). ` +
+              "Local OCR ran but found no readable text either — this looks like a chart, a skewed " +
+              "table, or handwriting rather than plain scanned text, and those still need a working vision model.",
+            { cause: visionError },
+          );
+        }
+        usedLocalOcrFallback = true;
+        result = {
+          text: ocrText,
+          provider: "local",
+          model: "tesseract-ocr",
+          native: false,
+          attempts: [],
+        };
+      }
 
       const singlePdf = loadedPdfs.length === 1 ? loadedPdfs.at(0) : undefined;
       const pdfDetails = singlePdf
@@ -636,7 +712,11 @@ export function createPdfTool(options?: {
             ),
           };
 
-      return buildTextToolResult(result, { native: result.native, ...pdfDetails });
+      return buildTextToolResult(result, {
+        native: result.native,
+        ...(usedLocalOcrFallback ? { ocrFallback: true } : {}),
+        ...pdfDetails,
+      });
     },
   };
 }
