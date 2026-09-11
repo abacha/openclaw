@@ -23,7 +23,7 @@ describe("createWhatsAppInboundMessageDebouncer", () => {
   it("merges two same-lane messages that arrive inside one debounce window into a single flush", async () => {
     const flushed: WhatsAppQueuedInboundMessage[] = [];
     const debouncer = createWhatsAppInboundMessageDebouncer({
-      debounceMs: 50,
+      resolveDebounceMs: () => 50,
       onMessage: async (msg) => {
         flushed.push(msg as WhatsAppQueuedInboundMessage);
       },
@@ -51,7 +51,7 @@ describe("createWhatsAppInboundMessageDebouncer", () => {
   it("orders a merged flush by timestamp first, then receiveOrder as the tiebreaker", async () => {
     const flushed: WhatsAppQueuedInboundMessage[] = [];
     const debouncer = createWhatsAppInboundMessageDebouncer({
-      debounceMs: 50,
+      resolveDebounceMs: () => 50,
       onMessage: async (msg) => {
         flushed.push(msg as WhatsAppQueuedInboundMessage);
       },
