@@ -27,7 +27,7 @@ the Discord extension itself:
 **Do not key the item mapping on the outbound `messageId`.** The click does not carry the card's
 message id to the consumer: the inbound turn built in
 `extensions/discord/src/monitor/agent-components.dispatch.ts` sets `MessageSid` to the Discord
-*interaction* id, and the card's own message id is passed as `replyToId`, which only feeds the
+_interaction_ id, and the card's own message id is passed as `replyToId`, which only feeds the
 reply-reference planner for the outgoing answer. A consumer that recorded `messageId → item` when
 it sent the card has no field to join on when the click comes back.
 
