@@ -13,28 +13,42 @@ introduce new mechanism — see [Discord components and approvals](/channels/dis
 for the `components` payload, TTL config, and how a click returns as an inbound message. This page
 covers what a consumer must do around that mechanism so the card is a shortcut, never the record.
 
-Proven by real events on 2026-09-24 (see the spec `2026-09-24-cards-acionaveis-no-discord` in the
-Obsidian vault for the raw evidence): a card with buttons was sent from both an interactive turn
-and a scheduled (cron) turn with no config change, in both cases with an explicit `target`; the
-click came back as a normal inbound message with the clicking user identified
-(`sender.id`/`chat_id`/`message_id`); and a button sent with `reusable: true` accepted a second,
-contradictory click with nothing in the mechanism reconciling the two.
+Three behaviours of the current implementation set the whole contract, and each is observable in
+the Discord extension itself:
+
+- a card with buttons sends from a scheduled turn exactly as from an interactive one, given an
+  explicit `target`;
+- a click arrives as an ordinary inbound turn, with the clicking user identified;
+- `reusable: true` does not expire on first use, so the same card accepts a second, contradictory
+  click and nothing in the mechanism reconciles the two.
 
 ## 1. Identifying the decided item
 
-A component's `custom_id` is opaque — it is not a place to smuggle meaning the consumer can
-recover from the click alone. The click event only carries the button label as content plus the
-sender/channel/message identifiers. A consumer must therefore keep its own mapping from the
-`messageId` (and, if several buttons/items share one message, the button label or position) back
-to the item it represents, recorded when the card is sent, not reconstructed when the click
-arrives. Do not encode the decision itself in the label text beyond what a human reads; the
-mapping lives in the consumer's own store, keyed by the outbound `messageId`.
+**Do not key the item mapping on the outbound `messageId`.** The click does not carry the card's
+message id to the consumer: the inbound turn built in
+`extensions/discord/src/monitor/agent-components.dispatch.ts` sets `MessageSid` to the Discord
+*interaction* id, and the card's own message id is passed as `replyToId`, which only feeds the
+reply-reference planner for the outgoing answer. A consumer that recorded `messageId → item` when
+it sent the card has no field to join on when the click comes back.
+
+The item key must therefore travel in the click payload the consumer actually receives — the
+inbound text. Two shapes carry it today:
+
+- a **command action** (`action: { type: "command", command: "/verdict approve item-123" }`): the
+  command string arrives verbatim as the inbound turn text, so the item key is in it;
+- the **button label**, when the label is unique per item inside the producer's own namespace —
+  with no command action, the inbound text is derived from the label.
+
+A `callback` action is plugin data, not agent text: its `value` is dispatched to a registered
+interactive handler, and when no plugin claims it the inbound text falls back to the label. Do not
+rely on `value` reaching an agent turn. A component's `custom_id` is opaque in every case and is
+never a place to smuggle meaning.
 
 ## 2. Where the decision is recorded
 
-The button is never the record. Each consumer keeps its own durable store — the
-`assimilator-state.json` file, the charter reviewer's verdict store, or the equivalent for any new
-consumer — and that store remains the single source of truth. The click's only job is to produce
+The button is never the record. Each consumer keeps its own durable store — a state file, a
+verdict table, a row in whatever the producer already owns — and that store remains the single
+source of truth. The click's only job is to produce
 an inbound turn that writes to that store, exactly as a free-text approval would. A consumer that
 has no durable store of its own is not ready to add a card: the card cannot become the store just
 because it is more convenient to click than to type.
@@ -47,8 +61,8 @@ must ship `reusable: false`. When a consumer has a real reason to allow a second
 card (correcting a mistake, changing a verdict before a deadline), it must treat that second click
 as a **dated correction of the first**, written to the store with its own timestamp, never as a
 second, independent approval. A consumer must pick one of these two paths explicitly; silently
-accepting `reusable: true` with no reconciliation logic reproduces the double-approval measured on
-2026-09-24.
+accepting `reusable: true` with no reconciliation logic records two independent approvals for one
+decision.
 
 ## 4. Readable fallback
 
